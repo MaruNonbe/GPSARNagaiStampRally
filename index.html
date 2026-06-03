@@ -85,6 +85,41 @@
       color: #111827;
     }
 
+    #dataSaverBtn {
+      position: fixed;
+      top: 122px;
+      left: 10px;
+      min-width: 128px;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 8px;
+      background: rgba(17, 24, 39, 0.76);
+      color: #fff;
+      font-size: 12px;
+      font-weight: bold;
+      z-index: 1200;
+      cursor: pointer;
+    }
+
+    #dataSaverBtn.active {
+      background: #14b8a6;
+      border-color: #14b8a6;
+      color: #052e2b;
+    }
+
+    body.data-saver #map {
+      display: none;
+    }
+
+    body.data-saver #toggleBtn {
+      bottom: 15px;
+    }
+
+    body.data-saver #stampStatus {
+      bottom: 80px;
+    }
+
     a-scene { position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
     video { z-index: -1 !important; }
   </style>
@@ -114,6 +149,8 @@
     <button class="lang-btn" data-lang="zh" onclick="setLanguage('zh')">中文</button>
     <button class="lang-btn" data-lang="ko" onclick="setLanguage('ko')">한국어</button>
   </div>
+
+  <button id="dataSaverBtn" onclick="toggleDataSaver()">省通信 OFF</button>
 
   <button id="toggleBtn" onclick="toggleStamps()">🏆</button>
 
@@ -283,6 +320,18 @@
       en: 'Answer',
       zh: '答案',
       ko: '정답'
+    },
+    dataSaverOn: {
+      ja: '省通信 ON',
+      en: 'Data Saver ON',
+      zh: '省流量 ON',
+      ko: '데이터 절약 ON'
+    },
+    dataSaverOff: {
+      ja: '省通信 OFF',
+      en: 'Data Saver OFF',
+      zh: '省流量 OFF',
+      ko: '데이터 절약 OFF'
     }
   };
 
@@ -380,6 +429,7 @@
   };
   let currentLang = localStorage.getItem('display_lang') || 'ja';
   if (!LANGUAGES.includes(currentLang)) currentLang = 'ja';
+  let isDataSaverMode = localStorage.getItem('data_saver_mode') === 'true';
 
   let userStamps = JSON.parse(localStorage.getItem('user_stamps')) || {};
   let polyline; // 軌跡を表示する線
@@ -409,6 +459,7 @@
     currentLang = lang;
     localStorage.setItem('display_lang', currentLang);
     updateLanguageButtons();
+    updateDataSaverUI();
     updateStampUI();
     refreshStoryPlates();
   }
@@ -426,6 +477,28 @@
     PLACES.forEach(p => {
       if (userStamps[p.id]) showStoryPlate(p);
     });
+  }
+
+  function toggleDataSaver() {
+    setDataSaverMode(!isDataSaverMode);
+  }
+
+  function setDataSaverMode(enabled) {
+    isDataSaverMode = enabled;
+    localStorage.setItem('data_saver_mode', String(isDataSaverMode));
+    updateDataSaverUI();
+  }
+
+  function updateDataSaverUI() {
+    document.body.classList.toggle('data-saver', isDataSaverMode);
+    const btn = document.getElementById('dataSaverBtn');
+    if (!btn) return;
+    btn.classList.toggle('active', isDataSaverMode);
+    btn.textContent = isDataSaverMode ? UI_TEXT.dataSaverOn[currentLang] : UI_TEXT.dataSaverOff[currentLang];
+  }
+
+  function getPositionLogInterval() {
+    return isDataSaverMode ? 60000 : 10000;
   }
 
   function getDeviceId() {
@@ -546,12 +619,14 @@
       const newPos = { lat: lat, lng: lon };
       
       // 1. 軌跡配列に新しい座標を追加
-      pathCoordinates.push(newPos);
+      if (!isDataSaverMode && map && marker && polyline) {
+        pathCoordinates.push(newPos);
       // 2. 線のデータを更新して地図に反映
-      polyline.setPath(pathCoordinates);
+        polyline.setPath(pathCoordinates);
 
-      marker.setPosition(newPos);
-      map.setCenter(newPos);
+        marker.setPosition(newPos);
+        map.setCenter(newPos);
+      }
 
       checkStamps(lat, lon);
 
@@ -564,8 +639,8 @@
       }
       prevPos = { lat, lng: lon };
 
-      if (Date.now() - lastLogTime > 10000) {
-        sendLog({ event: 'position', lat, lon, distance_km: totalDistance });
+      if (Date.now() - lastLogTime > getPositionLogInterval()) {
+        sendLog({ event: 'position', lat, lon, distance_km: totalDistance, dataSaver: isDataSaverMode });
         lastLogTime = Date.now();
       }
     }, err => console.warn(err), { enableHighAccuracy: true });
@@ -589,6 +664,7 @@
     document.getElementById('id').textContent = DEVICE_ID;
     document.getElementById('urlId').textContent = URL_ID || '-';
     updateLanguageButtons();
+    updateDataSaverUI();
     updateStampUI();
     createARModels();
     window.addEventListener('click', () => {
