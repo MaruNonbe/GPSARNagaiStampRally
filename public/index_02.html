@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>GPS AR</title>
+
+<style>
+  body { margin:0; overflow:hidden; }
+
+  /* GoogleMap は画面下 30% に表示 */
+  #map {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 30vh;
+    z-index: 500;
+  }
+
+  /* 位置情報パネル（左上） */
+  #infoPanel {
+      position:absolute; top:10px; left:10px;
+      background:rgba(0,0,0,0.5); padding:10px;
+      border-radius:8px; color:#fff; font-size:14px;
+      z-index:1000;
+  }
+
+  /* A-Frame / AR.js シーンは画面全体（カメラ映像の背景） */
+  a-scene {
+    position: fixed !important;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;      /* HUD や地図より下 */
+  }
+</style>
+
+<!-- A-Frame + AR.js（ARカメラ用） -->
+<script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.1/aframe/build/aframe-ar.js"></script>
+
+<!-- Google Maps API（※必ず1回だけ） -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyACib9absBqRW6ErBmjg4_jXcfq-CihVYE&callback=initMap"
+        async defer></script>
+
+</head>
+
+<body>
+
+<!-- 位置情報表示 -->
+<div id="infoPanel">
+  位置を取得中…<br>
+  lat:<span id="lat"></span><br>
+  lon:<span id="lon"></span><br>
+  精度:<span id="acc"></span>m<br>
+  走行距離:<span id="dist"></span> km
+</div>
+
+<!-- GoogleMap（画面下部） -->
+<div id="map"></div>
+
+<!-- AR カメラシーン -->
+<a-scene
+  vr-mode-ui="enabled: false"
+  embedded
+  renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
+  arjs="sourceType: webcam; debugUIEnabled: false;"
+>
+  <!-- 例：道の駅かわのみなと長井に 3D モデルを表示する -->
+  <!-- model.glb のパスは必要に応じて変更してください -->
+  <a-entity
+    id="poi-model"
+    gps-entity-place="latitude: 38.108993; longitude: 140.043767;"
+    gltf-model="model.glb"
+    scale="1 1 1"
+    visible="true">
+  </a-entity>
+
+  <!-- GPS カメラ -->
+  <a-camera gps-camera rotation-reader></a-camera>
+</a-scene>
+
+<script>
+let map;
+let marker;
+let prevPos = null;
+let totalDistance = 0;
+
+function initMap() {
+    console.log("★ initMap が呼び出されました ★");
+
+    map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 35.0, lng: 135.0 },
+        zoom: 15,
+        streetViewControl: false,
+        mapTypeControl: false,
+    });
+
+    marker = new google.maps.Marker({
+        map: map,
+        position: { lat: 35.0, lng: 135.0 },
+    });
+
+    startGPS();
+}
+
+function startGPS() {
+    if (!navigator.geolocation) {
+        alert("GPS が使えません");
+        return;
+    }
+
+    navigator.geolocation.watchPosition(
+        pos => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            const acc = pos.coords.accuracy;
+
+            // HUD 更新
+            document.getElementById("lat").innerHTML = lat.toFixed(6);
+            document.getElementById("lon").innerHTML = lon.toFixed(6);
+            document.getElementById("acc").innerHTML = acc.toFixed(1);
+
+            // GoogleMap 更新
+            const newPos = { lat, lng: lon };
+            marker.setPosition(newPos);
+            map.setCenter(newPos);
+
+            // 走行距離
+            if (prevPos) {
+                const d = getDistance(prevPos.lat, prevPos.lng, lat, lon);
+                totalDistance += d;
+                document.getElementById("dist").innerHTML = totalDistance.toFixed(3);
+            }
+            prevPos = { lat, lng: lon };
+        },
+        err => {
+            alert("位置情報が取得できません：" + err.message);
+        },
+        { enableHighAccuracy: true }
+    );
+}
+
+// 2点間の距離（km）
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLon = (lon2-lon1) * Math.PI/180;
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1*Math.PI/180) *
+      Math.cos(lat2*Math.PI/180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+</script>
+
+</body>
+</html>

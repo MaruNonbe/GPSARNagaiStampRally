@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>GPS AR スタンプラリー</title>
+
+  <style>
+    body { margin:0; overflow:hidden; font-family: sans-serif; }
+    #map { position: fixed; left: 0; bottom: 0; width: 100%; height: 30vh; z-index: 500; }
+
+    #infoPanel {
+      position:absolute; top:10px; left:10px; right: 10px;
+      background:rgba(0,0,0,0.7); padding:10px;
+      border-radius:8px; color:#fff; font-size:12px;
+      z-index:1000; display: flex; justify-content: space-between;
+    }
+
+    /* --- スタンプ帳の配置変更（地図のすぐ上の右側） --- */
+    #stampStatus {
+      position: fixed;
+      bottom: calc(30vh + 80px); /* 地図の高さ + ボタン余白 */
+      right: 15px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      max-height: 40vh;
+      overflow-y: auto;
+      z-index: 1100; /* ボタンより前面 */
+      width: 180px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      display: none; /* 初期状態は非表示 */
+      border: 1px solid #ddd;
+    }
+
+    /* --- 表示切り替えボタンのスタイル --- */
+    #toggleBtn {
+      position: fixed;
+      bottom: calc(30vh + 15px); /* 地図のすぐ上 */
+      right: 15px;
+      width: 55px;
+      height: 55px;
+      background: #e91e63;
+      color: white;
+      border-radius: 50%;
+      border: none;
+      font-size: 24px;
+      z-index: 1000;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stamp-item { margin-bottom: 6px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+    .stamp-item.got { color: #e91e63; font-weight: bold; }
+
+    a-scene { position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+    video { z-index: -1 !important; }
+  </style>
+
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.1/aframe/build/aframe-ar.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyACib9absBqRW6ErBmjg4_jXcfq-CihVYE&callback=initMap" async defer></script>
+</head>
+
+<body>
+
+  <div id="infoPanel">
+    <div>
+      ID: <span id="id"></span> | <span id="urlId"></span><br>
+      走破: <span id="dist">0.000</span> km<br>
+      現在: <span id="lat">0</span>, <span id="lon">0</span>
+    </div>
+    <div style="text-align: right; font-size: 16px;">
+      スタンプ<br>
+      <span id="stampCount" style="font-weight: bold; color: #ffeb3b;">0</span> / 11
+    </div>
+  </div>
+
+  <button id="toggleBtn" onclick="toggleStamps()">🏆</button>
+
+  <div id="stampStatus">
+    <div style="font-weight:bold; border-bottom:1px solid #ccc; margin-bottom:8px; padding-bottom:5px; display: flex; justify-content: space-between;">
+        <span>スタンプ帳</span>
+        <span onclick="toggleStamps()" style="cursor:pointer; color:#999;">✕</span>
+    </div>
+    <div id="stampList"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <a-scene
+    vr-mode-ui="enabled: false"
+    embedded
+    renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
+    arjs="sourceType: webcam; debugUIEnabled: false; facingMode: environment;"
+  >
+    <a-camera gps-camera rotation-reader></a-camera>
+  </a-scene>
+
+  <script>
+  'use strict';
+
+  // --- 表示切り替え関数 ---
+  function toggleStamps() {
+    const statusDiv = document.getElementById('stampStatus');
+    if (statusDiv.style.display === 'none' || statusDiv.style.display === '') {
+      statusDiv.style.display = 'block';
+    } else {
+      statusDiv.style.display = 'none';
+    }
+  }
+
+  const PLACES = [
+    { id:'tas-park', name:'タスパークホテル', lat:38.10148128126027, lon:140.0433090680094, radius:30, model:'./Index/3DModel/Tas.glb' },
+    { id:'michinoeki', name:'道の駅', lat:38.108970970886325, lon:140.04382939078403, radius:30, model:'./Index/3DModel/Michinoeki.glb' },
+    { id:'mnagai-es', name:'長井小学校', lat:38.107796313044474, lon:140.04269068239356, radius:25, model:'./Index/3DModel/NagaiJuniorHishSchool.glb' },
+    { id:'kozakurakan', name:'小桜館', lat:38.110963329145335, lon:140.03632275489852, radius:25, model:'./Index/3DModel/Kozakurakan.glb' },
+    { id:'marudaiougiya', name:'丸大扇屋', lat:38.11228246118919, lon:140.036198935986, radius:25, model:'./Index/3DModel/MarudaiOgiya.glb' },
+    { id:'nagaisiyakusho', name:'長井市役所', lat:38.1063333593554, lon:140.033892868012, radius:25, model:'./Index/3DModel/NagaiSiyakusho.glb' },
+    { id:'kougyoukoukou', name:'長井工業', lat:38.114426209437404, lon:140.03013087985815, radius:25, model:'./Index/3DModel/NagaiIndustryHighSchppl.glb' },
+    { id:'nagaikoukou', name:'長井高校', lat:38.097283861825424, lon:140.0380452392042, radius:25, model:'./Index/3DModel/NagaiHighSchool.glb' },
+    { id:'minaminagai', name:'南長井駅', lat:38.09769549394771, lon:140.03458623775896, radius:25, model:'./Index/3DModel/MinamiNagai.glb' },
+    { id:'kurunt', name:'くるんと', lat:38.10491876278905, lon:140.03466346205656, radius:25, model:'./Index/3DModel/Kurunt.glb' },
+    { id:'MyHome', name:'MyHome', lat:38.10011158734515, lon:140.0225346622888, radius:30, model:'./Index/3DModel/MyHome.glb' }
+  ];
+
+  let userStamps = JSON.parse(localStorage.getItem('user_stamps')) || {};
+
+  function getDeviceId() {
+    let id = localStorage.getItem('device_id');
+    if (!id) {
+      id = 'DEV-' + Math.random().toString(36).substring(2, 10);
+      localStorage.setItem('device_id', id);
+    }
+    return id;
+  }
+
+  const DEVICE_ID = getDeviceId();
+  const URL_ID = new URLSearchParams(location.search).get('id') || '';
+  const LOG_ENDPOINT = 'https://script.google.com/macros/s/AKfycbw_uhqYjG25qdhdrZ6zCZgjTCKPVypqmTcgKenXBtt4LSBCaoARHYSAYxtMEHijY1rSdA/exec';
+
+  function sendLog(payload) {
+    const data = Object.assign({ deviceId: DEVICE_ID, urlId: URL_ID, ts: Date.now() }, payload);
+    fetch(LOG_ENDPOINT, { method: 'POST', mode: 'no-cors', body: JSON.stringify(data) });
+  }
+
+  function updateStampUI() {
+    const list = document.getElementById('stampList');
+    list.innerHTML = '';
+    let count = 0;
+    PLACES.forEach(p => {
+      const isGot = userStamps[p.id];
+      if (isGot) count++;
+      const item = document.createElement('div');
+      item.className = `stamp-item ${isGot ? 'got' : ''}`;
+      item.textContent = `${isGot ? '✅' : '⚪'} ${p.name}`;
+      list.appendChild(item);
+    });
+    document.getElementById('stampCount').textContent = count;
+  }
+
+  function checkStamps(lat, lon) {
+    PLACES.forEach(p => {
+      if (userStamps[p.id]) return;
+
+      const dist = getDistance(lat, lon, p.lat, p.lon) * 1000;
+      if (dist <= p.radius) {
+        userStamps[p.id] = true;
+        localStorage.setItem('user_stamps', JSON.stringify(userStamps));
+        updateStampUI();
+        alert(`【スタンプGET！】\n${p.name} に到達しました！`);
+        sendLog({ event: 'stamp_get', poiId: p.id, poiName: p.name, lat, lon });
+      }
+    });
+  }
+
+  let map, marker, prevPos = null, totalDistance = 0, lastLogTime = 0;
+
+  function initMap() {
+    map = new google.maps.Map(document.getElementById('map'), { 
+      center: { lat: 38.10, lng: 140.03 }, 
+      zoom: 15, 
+      disableDefaultUI: true 
+    });
+    marker = new google.maps.Marker({ map: map });
+    startGPS();
+  }
+
+  function startGPS() {
+    navigator.geolocation.watchPosition(pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = pos.coords.accuracy;
+
+      document.getElementById('lat').textContent = lat.toFixed(5);
+      document.getElementById('lon').textContent = lon.toFixed(5);
+
+      const newPos = { lat, lng: lon };
+      marker.setPosition(newPos);
+      map.setCenter(newPos);
+
+      checkStamps(lat, lon);
+
+      if (prevPos) {
+        const d = getDistance(prevPos.lat, prevPos.lng, lat, lon);
+        if (d > 0.002) {
+          totalDistance += d;
+          document.getElementById('dist').textContent = totalDistance.toFixed(3);
+        }
+      }
+      prevPos = newPos;
+
+      if (Date.now() - lastLogTime > 10000) {
+        sendLog({ event: 'position', lat, lon, accuracy: acc, distance_km: totalDistance });
+        lastLogTime = Date.now();
+      }
+    }, err => console.warn(err), { enableHighAccuracy: true });
+  }
+
+  function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function createARModels() {
+    const scene = document.querySelector('a-scene');
+    PLACES.forEach(p => {
+      const ent = document.createElement('a-entity');
+      ent.setAttribute('gps-entity-place', `latitude: ${p.lat}; longitude: ${p.lon};`);
+      ent.setAttribute('gltf-model', p.model);
+      ent.setAttribute('scale', '5 5 5');
+      scene.appendChild(ent);
+    });
+  }
+
+  window.addEventListener('load', () => {
+    document.getElementById('id').textContent = DEVICE_ID;
+    document.getElementById('urlId').textContent = URL_ID || '-';
+    updateStampUI();
+    createARModels();
+    window.addEventListener('click', () => {
+      const v = document.querySelector('video');
+      if(v) v.play();
+    }, {once: true});
+  });
+  </script>
+</body>
+</html>

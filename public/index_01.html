@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
+  <title>Nagai AR GPS Log System</title>
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    /* 1. 成功時の透過ロジック：背景を透明に固定 */
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background-color: transparent !important;
+      overflow: hidden;
+    }
+
+    /* ビデオレイヤーを最背面に強制 */
+    video {
+      position: fixed !important; top: 0; left: 0;
+      width: 100% !important; height: 100% !important;
+      object-fit: cover !important; z-index: -1 !important;
+    }
+
+    /* タブメニュー（最前面） */
+    #tabs {
+      position: fixed; top: 0; left: 0; right: 0; height: 50px;
+      background: rgba(0,0,0,0.85); display: flex; z-index: 5000;
+    }
+    .tab { flex: 1; color: #ccc; text-align: center; line-height: 50px; cursor: pointer; font-size: 14px; }
+    .tab.active { border-bottom: 4px solid #3fa9f5; color: #fff; font-weight: bold; }
+
+    /* HUD (AR画面上に浮かせるログ情報) */
+    #ui-hud {
+      position: fixed; top: 60px; left: 10px; z-index: 4000;
+      color: #fff; text-shadow: 1px 1px 2px #000; pointer-events: none;
+      font-size: 11px; font-family: monospace;
+    }
+
+    /* 地図とスタンプ帳：ARの時は不透明レイヤーを物理的に消す */
+    .overlay-page {
+      position: fixed; top: 50px; bottom: 0; left: 0; right: 0;
+      z-index: 3000; display: none;
+    }
+    .overlay-page.active { display: block; }
+    
+    #page-map { background: #fff; }
+    #page-stamps {
+      background: #f8f9fa;
+      overflow-y: auto !important; /* スクロール可能に修正 */
+      -webkit-overflow-scrolling: touch;
+      padding: 10px;
+    }
+
+    .stamp-card {
+      background: #fff; border-radius: 12px; padding: 15px; margin-bottom: 12px;
+      display: flex; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      color: #333;
+    }
+    .stamp-card.got { border-left: 6px solid #4caf50; background: #e8f5e9; }
+  </style>
+</head>
+
+<body>
+
+  <div id="tabs">
+    <div class="tab active" id="btn-ar" onclick="switchTab('ar')">ARカメラ</div>
+    <div class="tab" id="btn-map" onclick="switchTab('map')">地図</div>
+    <div class="tab" id="btn-stamps" onclick="switchTab('stamps')">スタンプ帳</div>
+  </div>
+
+  <div id="ui-hud">
+    ID: <span id="deviceId">ID取得中</span><br>
+    LAT: <span id="dispLat">0</span> | LON: <span id="dispLon">0</span><br>
+    DIST: <span id="dist">0.00</span> km | STAMPS: <span id="stampCount">0</span>/11
+  </div>
+
+  <a-scene embedded vr-mode-ui="enabled: false" renderer="alpha: true; antialias: true;" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+    <a-camera gps-camera rotation-reader></a-camera>
+  </a-scene>
+
+  <div id="page-map" class="overlay-page"><div id="map" style="width:100%; height:100%;"></div></div>
+  <div id="page-stamps" class="overlay-page"><div id="stampList"></div></div>
+
+  <script>
+  'use strict';
+
+  // 人流解析用Unique IDの発行
+  const DEVICE_ID = localStorage.getItem('device_id') || 'UID-' + Math.random().toString(36).substring(2, 10);
+  localStorage.setItem('device_id', DEVICE_ID);
+
+  // GAS送信エンドポイント
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbw_uhqYjG25qdhdrZ6zCZgjTCKPVypqmTcgKenXBtt4LSBCaoARHYSAYxtMEHijY1rSdA/exec';
+
+  const PLACES = [
+    { id:'tas-park', name:'タスパークホテル', lat:38.10148, lon:140.04330, radius:30, model:'./Index/3DModel/Tas.glb' },
+    { id:'michinoeki', name:'道の駅かわのみなと', lat:38.10897, lon:140.04382, radius:30, model:'./Index/3DModel/Michinoeki.glb' },
+    { id:'mnagai-es', name:'長井小学校', lat:38.10779, lon:140.04269, radius:25, model:'./Index/3DModel/NagaiJuniorHishSchool.glb' },
+    { id:'kozakurakan', name:'小桜館', lat:38.11096, lon:140.03632, radius:25, model:'./Index/3DModel/Kozakurakan.glb' },
+    { id:'marudaiougiya', name:'丸大扇屋', lat:38.11228, lon:140.03619, radius:25, model:'./Index/3DModel/MarudaiOgiya.glb' },
+    { id:'nagaisiyakusho', name:'長井市役所', lat:38.10633, lon:140.03389, radius:25, model:'./Index/3DModel/NagaiSiyakusho.glb' },
+    { id:'kougyoukoukou', name:'長井工業高校', lat:38.11442, lon:140.03013, radius:25, model:'./Index/3DModel/NagaiIndustryHighSchppl.glb' },
+    { id:'nagaikoukou', name:'長井高校', lat:38.09728, lon:140.03804, radius:25, model:'./Index/3DModel/NagaiHighSchool.glb' },
+    { id:'minaminagai', name:'南長井駅', lat:38.09769, lon:140.03458, radius:25, model:'./Index/3DModel/MinamiNagai.glb' },
+    { id:'kurunt', name:'くるんと', lat:38.10491, lon:140.03466, radius:25, model:'./Index/3DModel/Kurunt.glb' },
+    { id:'MyHome', name:'マイホーム', lat:38.10011, lon:140.02253, radius:30, model:'./Index/3DModel/MyHome.glb' }
+  ];
+
+  let userStamps = JSON.parse(localStorage.getItem('user_stamps')) || {};
+  let map, marker, lastPos = null, totalDist = 0, lastLogTime = 0;
+
+  function sendLog(payload) {
+    const data = Object.assign({ deviceId: DEVICE_ID, time: new Date().toLocaleString() }, payload);
+    fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(data) });
+  }
+
+  function switchTab(type) {
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById(`btn-${type}`).classList.add('active');
+    document.querySelectorAll('.overlay-page').forEach(el => el.classList.remove('active'));
+
+    if(type === 'ar') {
+      document.body.style.backgroundColor = "transparent";
+    } else {
+      document.body.style.backgroundColor = "#fff";
+      document.getElementById(`page-${type}`).classList.add('active');
+      if(type === 'map' && map) setTimeout(() => map.invalidateSize(), 200);
+    }
+  }
+
+  function renderStamps() {
+    const list = document.getElementById('stampList');
+    list.innerHTML = '<h2 style="text-align:center;">スタンプ帳</h2>';
+    let count = 0;
+    PLACES.forEach(p => {
+      const isGot = userStamps[p.id];
+      if(isGot) count++;
+      list.innerHTML += `<div class="stamp-card ${isGot?'got':''}">
+        <div style="font-size:32px;margin-right:15px">${isGot?'🏆':'🔒'}</div>
+        <div><h3>${p.name}</h3></div>
+      </div>`;
+    });
+    document.getElementById('stampCount').textContent = count;
+  }
+
+  function initMap() {
+    map = L.map('map').setView([38.10, 140.02], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    marker = L.marker([38.10, 140.02]).addTo(map);
+
+    navigator.geolocation.watchPosition(p => {
+      const lat = p.coords.latitude, lon = p.coords.longitude;
+      document.getElementById('dispLat').textContent = lat.toFixed(5);
+      document.getElementById('dispLon').textContent = lon.toFixed(5);
+      marker.setLatLng([lat, lon]);
+
+      if (lastPos) {
+        const d = getDistance(lastPos.lat, lastPos.lon, lat, lon);
+        if (d > 0.005) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); }
+      }
+      lastPos = {lat, lon};
+
+      // スタンプと人流解析(Entry)判定
+      PLACES.forEach(place => {
+        if (userStamps[place.id]) return;
+        const dist = getDistance(lat, lon, place.lat, place.lon) * 1000;
+        if (dist <= place.radius) {
+          userStamps[place.id] = true;
+          localStorage.setItem('user_stamps', JSON.stringify(userStamps));
+          renderStamps();
+          alert(`スタンプGET: ${place.name}`);
+          sendLog({ event: 'ENTRY', point: place.name, lat, lon });
+        }
+      });
+
+      // 10秒毎にGPSログをGoogleSheetに送信
+      const now = Date.now();
+      if (now - lastLogTime > 10000) {
+        sendLog({ event: 'GPS_LOG', lat, lon, totalDist });
+        lastLogTime = now;
+      }
+    }, null, {enableHighAccuracy: true});
+  }
+
+  function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  window.addEventListener('load', () => {
+    document.getElementById('deviceId').textContent = DEVICE_ID;
+    initMap();
+    renderStamps();
+    const scene = document.querySelector('a-scene');
+    PLACES.forEach(p => {
+      const el = document.createElement('a-entity');
+      el.setAttribute('gps-entity-place', `latitude: ${p.lat}; longitude: ${p.lon};`);
+      el.setAttribute('gltf-model', p.model);
+      el.setAttribute('scale', '5 5 5');
+      scene.appendChild(el);
+    });
+    // iOS Safari：一度タップでカメラを動かす
+    window.addEventListener('click', () => { document.querySelector('video').play(); }, {once: true});
+  });
+  </script>
+</body>
+</html>
