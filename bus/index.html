@@ -162,6 +162,11 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
 .sheet .x { position: absolute; right: 6px; top: 6px; width: 44px; height: 44px; border: 0; background: transparent; color: var(--fg); font-size: 1.5rem; cursor: pointer; }
 .sheet { margin: 12px 0 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
+.nav { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.mapbox .nav svg { position: static; inset: auto; width: 64px; height: 64px; flex: 0 0 auto; }
+.nav .navtxt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nav .navtxt b { font-size: 1rem; }
+.nav button { flex: 0 0 auto; min-height: 44px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--fg); font: inherit; font-size: .9rem; font-weight: 700; cursor: pointer; }
 .photos { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0 2px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
 .photos figure { margin: 0; flex: 0 0 auto; }
 .photos .ph { height: 104px; aspect-ratio: 4 / 3; border-radius: 6px; border: 1px solid var(--line); background-color: var(--surface-2); background-repeat: no-repeat; cursor: zoom-in; }
@@ -764,6 +769,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
         '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + r + '" fill="' + col + '" stroke="' + (rs.length > 1 && !hub ? "var(--fg)" : "var(--surface)") + '" stroke-width="2"/></g>';
       if (showLbl || sel || hub) o += '<text class="lbl' + (sel ? " sel" : "") + '" x="' + (x + r + 5).toFixed(1) + '" y="' + (y + 4).toFixed(1) + '">' + n + "</text>";
     });
+    if (MAP.me && MAP.sel && POS[MAP.sel]) o += '<line x1="' + X(MAP.me[1]).toFixed(1) + '" y1="' + Y(MAP.me[0]).toFixed(1) + '" x2="' + X(POS[MAP.sel][1]).toFixed(1) + '" y2="' + Y(POS[MAP.sel][0]).toFixed(1) + '" stroke="#1a73e8" stroke-width="3" stroke-dasharray="2 7" stroke-linecap="round"/>';
     if (MAP.me) { const x = X(MAP.me[1]), y = Y(MAP.me[0]); o += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="16" fill="#1a73e8" fill-opacity=".2"/><circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="7" fill="#1a73e8" stroke="#fff" stroke-width="3"/>'; }
     msvg.innerHTML = o;
   }
@@ -775,7 +781,46 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
   }
   const sheetEl = $("#mapsheet");
   function showSheet(html) { sheetEl.hidden = false; sheetEl.innerHTML = '<button type="button" class="x" aria-label="閉じる">×</button>' + html; sheetEl.querySelector(".x").onclick = closeSheet; try { mbox.scrollIntoView({ block: "start", behavior: "smooth" }); } catch (e) {} return sheetEl; }
-  function closeSheet() { sheetEl.hidden = true; MAP.sel = null; drawMap(); }
+  function closeSheet() { stopNav(); sheetEl.hidden = true; MAP.sel = null; drawMap(); }
+  // ---- 現在地から停留所への方角 ----
+  const NAV = { watch: null, heading: null, stop: null, raf: 0 };
+  const rad = (d) => d * Math.PI / 180;
+  function bearingTo(a, b) { const f1 = rad(a[0]), f2 = rad(b[0]), dl = rad(b[1] - a[1]); return (Math.atan2(Math.sin(dl) * Math.cos(f2), Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl)) * 180 / Math.PI + 360) % 360; }
+  function distTo(a, b) { const dp = rad(b[0] - a[0]), dl = rad(b[1] - a[1]); const h = Math.sin(dp / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dl / 2) ** 2; return 12742000 * Math.asin(Math.sqrt(h)); }
+  const DIR8 = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+  function navHtml(n) {
+    if (!POS[n]) return "";
+    return '<div class="nav"><svg viewBox="-30 -30 60 60" aria-hidden="true"><circle r="28" fill="var(--surface)" stroke="var(--line)" stroke-width="1.5"/><g id="navring"><text y="-17" text-anchor="middle" font-size="9" font-weight="700" fill="var(--muted)">北</text></g><g id="navg"><path d="M0,-21 L10,11 L0,5 L-10,11 Z" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5" stroke-linejoin="round"/></g></svg>' +
+      '<div class="navtxt"><b id="navmain">方角を調べる</b><span class="fine" id="navsub">ボタンを押すと現在地から方角を示します</span></div><button type="button" id="navbtn">方角を見る</button></div>';
+  }
+  function updateNav() {
+    const g = $("#navg"); if (!g) return; const n = NAV.stop; if (!n || !POS[n]) return;
+    const main = $("#navmain"), sub = $("#navsub");
+    if (!MAP.me) { main.textContent = "現在地を確認中…"; return; }
+    const to = [POS[n][0], POS[n][1]], b = bearingTo(MAP.me, to), d = distTo(MAP.me, to), h = NAV.heading;
+    g.setAttribute("transform", "rotate(" + ((b - (h || 0) + 360) % 360).toFixed(0) + ")");
+    $("#navring").setAttribute("transform", "rotate(" + ((360 - (h || 0)) % 360).toFixed(0) + ")");
+    main.textContent = d < 25 ? "停留所の付近です" : DIR8[Math.round(b / 45) % 8] + "へ " + (d < 1000 ? "約" + (d < 100 ? Math.round(d) : Math.round(d / 10) * 10) + "m" : "約" + (d / 1000).toFixed(1) + "km");
+    sub.textContent = h == null ? "矢印は上が北です(方位センサーが使えません)" : "矢印は端末の向きに合わせています";
+  }
+  function navTick() { if (NAV.raf) return; NAV.raf = requestAnimationFrame(() => { NAV.raf = 0; updateNav(); }); }
+  function onOri(e) { const h = typeof e.webkitCompassHeading === "number" ? e.webkitCompassHeading : (e.absolute && e.alpha != null ? (360 - e.alpha) % 360 : null); if (h != null) { NAV.heading = h; navTick(); } }
+  function stopNav() { if (NAV.watch != null) { try { navigator.geolocation.clearWatch(NAV.watch); } catch (e) {} NAV.watch = null; } window.removeEventListener("deviceorientation", onOri, true); window.removeEventListener("deviceorientationabsolute", onOri, true); NAV.heading = null; const b = $("#navbtn"); if (b) b.textContent = "方角を見る"; }
+  async function startNav() {
+    try { if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === "function") { const r = await DeviceOrientationEvent.requestPermission(); if (r !== "granted") throw 0; }
+      window.addEventListener("deviceorientationabsolute", onOri, true); window.addEventListener("deviceorientation", onOri, true); } catch (e) {}
+    if (!navigator.geolocation) { $("#navmain").textContent = "現在地を取得できません"; $("#navsub").textContent = "この画面では位置情報が許可されていません"; return; }
+    $("#navbtn").textContent = "停止"; $("#navmain").textContent = "現在地を確認中…";
+    NAV.watch = navigator.geolocation.watchPosition((p) => { MAP.me = [p.coords.latitude, p.coords.longitude]; navTick(); if (!$("#p-map").hidden) requestAnimationFrame(drawMap); },
+      () => { const m = $("#navmain"); if (m) { m.textContent = "現在地を取得できません"; $("#navsub").textContent = "位置情報の許可を確認してください"; } stopNav(); },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  }
+  function bindNav(n) {
+    NAV.stop = n; const b = $("#navbtn"); if (!b) return;
+    if (NAV.watch != null) b.textContent = "停止";
+    b.onclick = () => { NAV.watch != null ? (stopNav(), $("#navmain").textContent = "方角を調べる", $("#navsub").textContent = "ボタンを押すと現在地から方角を示します") : startNav(); };
+    if (MAP.me) updateNav();
+  }
   function phStyle(p) { return "background-image:url(" + p[0] + ");background-size:600% 200%;background-position:" + (p[2] * 20) + "% " + (p[1] * 100) + "%"; }
   function photoHtml(n) {
     const ph = PHOTOS[n]; if (!ph || !ph.length) return "";
@@ -791,10 +836,11 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     const open = !off(ymd(d0)); let list = open ? deps.filter((d) => d.t >= nowM) : deps; let note = "";
     if (open && !list.length) { list = deps; note = "今日の運行は終わっています。次の運行日の時刻を表示しています。"; } else if (!open) note = "今日は運休です。運行日の時刻を表示しています。";
     showSheet('<h2 style="padding-right:40px">' + n + '</h2><div>' + rs.map((r) => '<span class="chip ' + ROUTES[r][0] + '">' + ROUTES[r][1] + "</span> ").join("") + "</div>" +
-      photoHtml(n) +
+      navHtml(n) + photoHtml(n) +
       '<div class="acts"><button type="button" data-a="from">ここから出発</button><button type="button" data-a="to">ここへ到着</button><button type="button" data-a="tt">時刻表を見る</button></div>' +
       (note ? '<p class="fine" style="margin:6px 0">' + note + "</p>" : "") +
       (list.length ? list.slice(0, 6).map((d) => '<div class="dep"><span class="t">' + N.fmt(d.t) + '</span><span class="chip ' + ROUTES[d.route][0] + '">' + ROUTES[d.route][1] + '</span><span class="sub">' + d.last + "行き</span></div>").join("") : '<span class="sub">この停留所の時刻はありません。</span>'));
+    bindNav(n);
     const phs = box.querySelector(".photos"); if (phs) { const pr = new Image(); pr.onerror = () => phs.remove(); pr.src = phs.dataset.sheet; phs.onclick = (e) => { const d = e.target.closest(".ph"); if (d) openPhoto(PHOTOS[n][+d.dataset.i], d.getAttribute("aria-label")); }; }
     box.querySelector(".acts").onclick = (e) => { const b = e.target.closest("button"); if (!b) return;
       if (b.dataset.a === "from") { fromEl.value = n; showTab("search"); run(); }
