@@ -730,6 +730,29 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     });
     return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍とみなしています)。信号や坂、天気で前後します。バスは1分でも余裕を見て乗り場に着くようにしてください。運賃は2区間の合計の目安です。</small></details>";
   }
+
+  // 出発側: 最初のバスまでの待ちが長いとき、歩いて行ける近くの停留所から乗る案
+  function walkFromHtml(from, to, time, res) {
+    if (state.mode !== "dep" || !res.length) return "";
+    const base = res.reduce((m, r) => Math.min(m, r.arr), 1e9), wait0 = res[0].dep - time;
+    if (wait0 < LONG_WAIT) return "";
+    const out = [];
+    (nearMap()[from] || []).forEach((c) => {
+      const t0 = time + c.w + 1, rs = N.search(c.n, to, t0, "dep"); if (!rs.length) return;
+      const b = rs.reduce((m, r) => (r.arr < m.arr || (r.arr === m.arr && r.dep > m.dep) ? r : m));
+      if (b.arr <= base - MIN_GAIN) out.push({ c, r: b, gain: base - b.arr });
+    });
+    out.sort((a, b) => a.r.arr - b.r.arr || a.c.w - b.c.w);
+    if (!out.length) return "";
+    let h = '<details class="walkalt" style="margin-left:0;margin-bottom:12px"><summary>' + from + "からのバスは約" + wait0 + "分待ちです。歩いて近くのバス停から乗る案(最大" + out[0].gain + "分早く着きます)</summary><ol>";
+    out.slice(0, 3).forEach((o) => {
+      const f = o.r.legs[0], cls = (ROUTES[f.route] || [""])[0], nmR = (ROUTES[f.route] || ["", f.route])[1];
+      h += "<li><div>" + from + 'から<span class="walkline"> 徒歩 約' + o.c.w + "分(約" + o.c.d + "m)</span> → <b>" + o.c.n + "</b></div>";
+      h += "<div>" + N.fmt(o.r.dep) + '発 <span class="chip ' + cls + '">' + nmR + "</span> " + f.no + "便" + (o.r.legs.length > 1 ? "(乗換" + (o.r.legs.length - 1) + "回)" : "") + " → <b>" + to + "</b> " + N.fmt(o.r.arr) + '着 <span class="gain">(元の案より' + o.gain + "分早い)</span></div>";
+      h += '<button type="button" data-walkfrom="' + o.c.n + '" data-wt="' + N.fmt(time + o.c.w + 1) + '">ここから検索する</button> <button type="button" data-walkmap="' + o.c.n + '">乗り場を地図で見る</button></li>';
+    });
+    return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。</small></details>";
+  }
   function card(r, i) {
     const trans = r.legs.length - 1;
     let html = '<article class="card"><div class="sum"><div class="times">' + N.fmt(r.dep) + " → " + N.fmt(r.arr) + "</div>";
@@ -748,7 +771,8 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     });
     return html + "</div></article>";
   }
-  document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-walkmap]"); if (!b) return; showTab("map"); selectStop(b.dataset.walkmap, true); });
+  document.addEventListener("click", (e) => { const w = e.target.closest && e.target.closest("[data-walkfrom]"); if (w) { fromEl.value = w.dataset.walkfrom; timeEl.value = w.dataset.wt; run(); return; }
+    const b = e.target.closest && e.target.closest("[data-walkmap]"); if (!b) return; showTab("map"); selectStop(b.dataset.walkmap, true); });
   function run() {
     const from = fromEl.value.trim(), to = toEl.value.trim(), box = $("#results"), nt = $("#notice");
     store.set("nagai.from", from); store.set("nagai.to", to);
@@ -769,7 +793,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
       box.innerHTML = '<div class="empty">この条件では見つかりませんでした。時刻を早めるか、別の日付にすると見つかることがあります。乗換は、長井市役所・長井駅前とヤマザワ前の2か所だけを探しています。</div>';
       return;
     }
-    box.innerHTML = res.map(card).join("");
+    box.innerHTML = walkFromHtml(from, to, N.hm(timeEl.value || "00:00"), res) + res.map(card).join("");
   }
 
   // ---- 時刻表 ----
