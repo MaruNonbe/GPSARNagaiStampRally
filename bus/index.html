@@ -718,7 +718,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
   }
   function walkHtml(r, k) {
     const alts = walkAlts(r, k);
-    if (!alts.length) return r.legs[k].dep - r.legs[k - 1].arr >= LONG_WAIT ? '<div class="walkalt none"><small>待ちが長い乗換ですが、近くのバス停から乗っても、早く着く案はありませんでした。</small></div>' : "";
+    if (!alts.length) return r.legs[k].dep - r.legs[k - 1].arr >= LONG_WAIT ? '<div class="walkalt none"><small>待ちが長い乗換ですが、乗換の途中で歩いて別のバス停から乗っても、早く着く案はありませんでした。</small></div>' : "";
     const g = alts[0].gain;
     let h = '<details class="walkalt"><summary>歩いて近くのバス停から乗る案(最大' + g + '分早く着きます)</summary><ol>';
     alts.forEach((a) => {
