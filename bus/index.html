@@ -764,6 +764,53 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     });
     return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。</small></details>";
   }
+  // 途中の停留所(ハブ以外も可)で降りて、歩いて近くの停留所から乗り継ぐ案
+  const ENUMC = {};
+  function enumFrom(n, to) { const k = n + "|" + to + "|" + (N.runs ? "j" : "r"); return ENUMC[k] || (ENUMC[k] = N.enumerate(n, to).filter((r) => r.legs.length <= 2)); }
+  function walkMidHtml(from, to, time, res) {
+    if (state.mode !== "dep" || !res.length) return "";
+    const bestR = res.reduce((m, r) => (r.arr < m.arr || (r.arr === m.arr && r.legs.length < m.legs.length) ? r : m));
+    const base = bestR.arr, NM = nearMap(), BS = byStop2(), cand = [];
+    const ok = (tr) => !N.runs || N.runs(tr);
+    (BS[from] || []).forEach(([tr1, i0]) => {
+      if (!ok(tr1)) return;
+      const d0 = tr1.stops[i0].t; if (d0 < time || d0 >= base) return;
+      let best = null;
+      for (let m = i0 + 1; m < tr1.stops.length; m++) {
+        const A = tr1.stops[m]; if (A.t >= base) break;
+        if (A.n === to) continue;
+        (NM[A.n] || []).forEach((c) => {
+          if (N.ALIGHT_ONLY && N.ALIGHT_ONLY.has(c.n)) return;
+          const ready = A.t + c.w + 1;
+          enumFrom(c.n, to).forEach((r) => {
+            if (r.dep < ready || r.arr > base - MIN_GAIN + (r.legs.length + 1 < bestR.legs.length ? MIN_GAIN : 0)) return;
+            if (r.legs.some((l) => l.tid === tr1.id)) return;
+            const total = r.legs.length + 1;
+            const o = { tr1, i0, m, A, c, r, arr: r.arr, total, gain: base - r.arr };
+            if (!best || o.arr < best.arr || (o.arr === best.arr && (o.total < best.total || (o.total === best.total && (o.c.w < best.c.w || (o.c.w === best.c.w && o.A.t > best.A.t)))))) best = o;
+          });
+        });
+      }
+      if (best) cand.push(best);
+    });
+    cand.sort((a, b) => a.arr - b.arr || a.total - b.total || a.c.w - b.c.w);
+    // 同じ乗り継ぎ先は1件に
+    const seen = new Set(), out = [];
+    cand.forEach((o) => { const k = o.A.n + ">" + o.c.n + ">" + o.r.dep; if (seen.has(k)) return; seen.add(k); out.push(o); });
+    if (!out.length) return "";
+    const g = out[0].gain, g0 = out[0].gain > 0 ? "最大" + g + "分早く着きます" : "乗換が減ります";
+    let h = '<details class="walkalt" style="margin-left:0;margin-bottom:12px" open><summary>途中のバス停で降りて、歩いて乗り継ぐ案(' + g0 + ")</summary><ol>";
+    out.slice(0, 3).forEach((o) => {
+      const l1 = ROUTES[o.tr1.route] || ["", o.tr1.route], l2 = o.r.legs[0], c2 = ROUTES[l2.route] || ["", l2.route];
+      const fare = N.fare(o.tr1, o.i0, o.m) + o.r.fare;
+      h += "<li><div>" + N.fmt(o.tr1.stops[o.i0].t) + " <b>" + from + '</b>発 <span class="chip ' + l1[0] + '">' + l1[1] + "</span> " + o.tr1.no + "便</div>";
+      h += "<div><b>" + o.A.n + "</b>で降りる(" + N.fmt(o.A.t) + '着)</div><div class="walkline">→ 徒歩 約' + o.c.w + "分(約" + o.c.d + "m)</div>";
+      h += "<div><b>" + o.c.n + "</b> " + N.fmt(l2.dep) + '発 <span class="chip ' + c2[0] + '">' + c2[1] + "</span> " + l2.no + "便" + (o.r.legs.length > 1 ? "(さらに乗換1回)" : "") + "</div>";
+      h += "<div>→ <b>" + to + "</b> " + N.fmt(o.r.arr) + '着 <span class="gain">' + (o.gain > 0 ? "(いちばん早い通常の案より" + o.gain + "分早い)" : "(到着は同じ・乗換が減ります)") + "</span> ・ 運賃 約" + fare + "円</div>";
+      h += '<button type="button" data-walkmap="' + o.c.n + '">乗り場を地図で見る</button></li>';
+    });
+    return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。信号や坂、天気で前後しますので、余裕を持ってご利用ください。</small></details>";
+  }
   function card(r, i) {
     const trans = r.legs.length - 1;
     let html = '<article class="card"><div class="sum"><div class="times">' + N.fmt(r.dep) + " → " + N.fmt(r.arr) + "</div>";
@@ -804,7 +851,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
       box.innerHTML = '<div class="empty">この条件では見つかりませんでした。時刻を早めるか、別の日付にすると見つかることがあります。乗換は、長井市役所・長井駅前とヤマザワ前の2か所だけを探しています。</div>';
       return;
     }
-    box.innerHTML = walkFromHtml(from, to, N.hm(timeEl.value || "00:00"), res) + res.map(card).join("");
+    box.innerHTML = walkFromHtml(from, to, N.hm(timeEl.value || "00:00"), res) + walkMidHtml(from, to, N.hm(timeEl.value || "00:00"), res) + res.map(card).join("");
   }
 
   // ---- 時刻表 ----
