@@ -765,6 +765,8 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。</small></details>";
   }
   // 途中の停留所(ハブ以外も可)で降り、歩いて近くの停留所から乗り継ぐ案(最大4回乗車まで。ハブの待ちも歩きで避ける)
+  let MIDSORT = "arr";
+  document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-midsort]"); if (!b) return; MIDSORT = b.dataset.midsort; run(); });
   function walkMidHtml(from, to, time, res) {
     if (state.mode !== "dep" || !res.length) return "";
     const bestR = res.reduce((m, r) => (r.arr < m.arr || (r.arr === m.arr && r.legs.length < m.legs.length) ? r : m));
@@ -808,12 +810,13 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     });
     const chain = (L) => { const a = []; for (let p = L; p; p = p.prev) a.unshift(p); return a; };
     found.forEach((L) => { L.ch = chain(L); L.sig = L.ch.map((x) => (x.via && x.via.walk ? x.prev.n + ">" + x.via.q : "") + (x.via && !x.via.walk ? "H" : "")).join("|") + "@" + L.t; });
-    found.sort((a, b) => a.t - b.t || a.k - b.k || b.d0 - a.d0);
+    found.forEach((L) => { L.wait = L.ch.reduce((s, x, q) => s + (q ? x.tr.stops[x.i].t - x.prev.t - (x.via.walk ? x.via.walk.w : 0) : 0), 0); });
+    if (MIDSORT === "wait") found.sort((a, b) => a.wait - b.wait || a.t - b.t || a.k - b.k || b.d0 - a.d0); else found.sort((a, b) => a.t - b.t || a.k - b.k || b.d0 - a.d0);
     const seen = new Set(), out = [];
     found.forEach((L) => { if (seen.has(L.sig)) return; seen.add(L.sig); out.push(L); });
     if (!out.length) return "";
-    const g = base - out[0].t, g0 = g > 0 ? "最大" + g + "分早く着きます" : "乗換が減ります";
-    let h = '<details class="walkalt" style="margin-left:0;margin-bottom:12px" open><summary>途中のバス停で降りて、歩いて乗り継ぐ案(' + g0 + ")</summary><ol>";
+    const g = base - Math.min(...out.map((L) => L.t)), g0 = g > 0 ? "最大" + g + "分早く着きます" : "乗換が減ります";
+    let h = '<details class="walkalt" style="margin-left:0;margin-bottom:12px" open><summary>途中のバス停で降りて、歩いて乗り継ぐ案(' + g0 + ')</summary><div class="midsort" style="margin:6px 0">' + [["arr", "早く着く順"], ["wait", "待ちが少ない順"]].map(([k, t]) => '<button type="button" data-midsort="' + k + '" style="margin-right:6px;' + (MIDSORT === k ? "font-weight:800;background:#0c6a54;color:#fff;" : "") + '">' + t + "</button>").join("") + "</div><ol>";
     out.slice(0, 3).forEach((L) => {
       let fare = 0; h += "<li>";
       L.ch.forEach((x, q) => {
@@ -825,7 +828,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
         fare += N.fare(x.tr, x.i, x.j);
         h += "<div>" + N.fmt(x.tr.stops[x.i].t) + " <b>" + x.tr.stops[x.i].n + '</b>発 <span class="chip ' + rt[0] + '">' + rt[1] + "</span> " + x.tr.no + "便 → <b>" + x.n + "</b> " + N.fmt(x.t) + "着</div>";
       });
-      h += '<div><span class="gain">' + (base - L.t > 0 ? "いちばん早い通常の案より" + (base - L.t) + "分早い" : "到着は同じ・乗換が減ります") + "</span> ・ 運賃 約" + fare + "円</div>";
+      h += "<div>乗り継ぎでの待ち 合計" + L.wait + "分</div>"; h += '<div><span class="gain">' + (base - L.t > 0 ? "いちばん早い通常の案より" + (base - L.t) + "分早い" : "到着は同じ・乗換が減ります") + "</span> ・ 運賃 約" + fare + "円</div>";
       const lastWalk = L.ch.filter((x) => x.via && x.via.walk).pop();
       h += '<button type="button" data-walkmap="' + (lastWalk ? lastWalk.via.q : L.ch[0].tr.stops[L.ch[0].i].n) + '">乗り場を地図で見る</button></li>';
     });
