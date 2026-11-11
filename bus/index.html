@@ -764,52 +764,72 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     });
     return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。</small></details>";
   }
-  // 途中の停留所(ハブ以外も可)で降りて、歩いて近くの停留所から乗り継ぐ案
-  const ENUMC = {};
-  function enumFrom(n, to) { const k = n + "|" + to + "|" + (N.runs ? "j" : "r"); return ENUMC[k] || (ENUMC[k] = N.enumerate(n, to).filter((r) => r.legs.length <= 2)); }
+  // 途中の停留所(ハブ以外も可)で降り、歩いて近くの停留所から乗り継ぐ案(最大4回乗車まで。ハブの待ちも歩きで避ける)
   function walkMidHtml(from, to, time, res) {
     if (state.mode !== "dep" || !res.length) return "";
     const bestR = res.reduce((m, r) => (r.arr < m.arr || (r.arr === m.arr && r.legs.length < m.legs.length) ? r : m));
-    const base = bestR.arr, NM = nearMap(), BS = byStop2(), cand = [];
-    const ok = (tr) => !N.runs || N.runs(tr);
+    const base = bestR.arr, NM = nearMap(), BS = byStop2(), HUBS = N.HUBS, MAXR = 4, WAITMAX = 150;
+    const ok = (tr) => !N.runs || N.runs(tr), found = [];
     (BS[from] || []).forEach(([tr1, i0]) => {
       if (!ok(tr1)) return;
       const d0 = tr1.stops[i0].t; if (d0 < time || d0 >= base) return;
-      let best = null;
+      let cur = {}, best = null;
       for (let m = i0 + 1; m < tr1.stops.length; m++) {
         const A = tr1.stops[m]; if (A.t >= base) break;
-        if (A.n === to) continue;
-        (NM[A.n] || []).forEach((c) => {
-          if (N.ALIGHT_ONLY && N.ALIGHT_ONLY.has(c.n)) return;
-          const ready = A.t + c.w + 1;
-          enumFrom(c.n, to).forEach((r) => {
-            if (r.dep < ready || r.arr > base - MIN_GAIN + (r.legs.length + 1 < bestR.legs.length ? MIN_GAIN : 0)) return;
-            if (r.legs.some((l) => l.tid === tr1.id)) return;
-            const total = r.legs.length + 1;
-            const o = { tr1, i0, m, A, c, r, arr: r.arr, total, gain: base - r.arr };
-            if (!best || o.arr < best.arr || (o.arr === best.arr && (o.total < best.total || (o.total === best.total && (o.c.w < best.c.w || (o.c.w === best.c.w && o.A.t > best.A.t)))))) best = o;
+        const key = A.n + "|0"; if (!cur[key] || A.t < cur[key].t) cur[key] = { n: A.n, w: 0, t: A.t, tr: tr1, i: i0, j: m, prev: null, via: null, k: 1, d0 };
+      }
+      for (let k = 1; k <= MAXR; k++) {
+        const dl = cur[to + "|1"];
+        if (dl && (!best || dl.t < best.t || (dl.t === best.t && dl.k < best.k))) best = dl;
+        if (k === MAXR) break;
+        const nxt = {};
+        Object.values(cur).forEach((L) => {
+          if (L.t >= base) return;
+          const cands = [];
+          if (HUBS.has(L.n)) cands.push({ q: L.n, r: L.t, walk: null });
+          (NM[L.n] || []).forEach((c) => { if (N.ALIGHT_ONLY && N.ALIGHT_ONLY.has(c.n)) return; cands.push({ q: c.n, r: L.t + c.w + 1, walk: c }); });
+          cands.forEach((cd) => {
+            (BS[cd.q] || []).forEach(([tr, i]) => {
+              if (!ok(tr)) return;
+              const dep = tr.stops[i].t; if (dep < cd.r || dep - cd.r > WAITMAX) return;
+              for (let p = L; p; p = p.prev) if (p.tr.id === tr.id) return;
+              const w2 = (L.w || cd.walk) ? 1 : 0;
+              for (let j = i + 1; j < tr.stops.length; j++) {
+                const S = tr.stops[j]; if (S.t >= base) break;
+                const key = S.n + "|" + w2, o = nxt[key];
+                if (!o || S.t < o.t) nxt[key] = { n: S.n, w: w2, t: S.t, tr, i, j, prev: L, via: cd, k: k + 1, d0 };
+              }
+            });
           });
         });
+        cur = nxt;
       }
-      if (best) cand.push(best);
+      if (best && (best.t <= base - MIN_GAIN || (best.t <= base && best.k < bestR.legs.length))) found.push(best);
     });
-    cand.sort((a, b) => a.arr - b.arr || a.total - b.total || a.c.w - b.c.w);
-    // 同じ乗り継ぎ先は1件に
+    const chain = (L) => { const a = []; for (let p = L; p; p = p.prev) a.unshift(p); return a; };
+    found.forEach((L) => { L.ch = chain(L); L.sig = L.ch.map((x) => (x.via && x.via.walk ? x.prev.n + ">" + x.via.q : "") + (x.via && !x.via.walk ? "H" : "")).join("|") + "@" + L.t; });
+    found.sort((a, b) => a.t - b.t || a.k - b.k || b.d0 - a.d0);
     const seen = new Set(), out = [];
-    cand.forEach((o) => { const k = o.A.n + ">" + o.c.n + ">" + o.r.dep; if (seen.has(k)) return; seen.add(k); out.push(o); });
+    found.forEach((L) => { if (seen.has(L.sig)) return; seen.add(L.sig); out.push(L); });
     if (!out.length) return "";
-    const g = out[0].gain, g0 = out[0].gain > 0 ? "最大" + g + "分早く着きます" : "乗換が減ります";
+    const g = base - out[0].t, g0 = g > 0 ? "最大" + g + "分早く着きます" : "乗換が減ります";
     let h = '<details class="walkalt" style="margin-left:0;margin-bottom:12px" open><summary>途中のバス停で降りて、歩いて乗り継ぐ案(' + g0 + ")</summary><ol>";
-    out.slice(0, 3).forEach((o) => {
-      const l1 = ROUTES[o.tr1.route] || ["", o.tr1.route], l2 = o.r.legs[0], c2 = ROUTES[l2.route] || ["", l2.route];
-      const fare = N.fare(o.tr1, o.i0, o.m) + o.r.fare;
-      h += "<li><div>" + N.fmt(o.tr1.stops[o.i0].t) + " <b>" + from + '</b>発 <span class="chip ' + l1[0] + '">' + l1[1] + "</span> " + o.tr1.no + "便</div>";
-      h += "<div><b>" + o.A.n + "</b>で降りる(" + N.fmt(o.A.t) + '着)</div><div class="walkline">→ 徒歩 約' + o.c.w + "分(約" + o.c.d + "m)</div>";
-      h += "<div><b>" + o.c.n + "</b> " + N.fmt(l2.dep) + '発 <span class="chip ' + c2[0] + '">' + c2[1] + "</span> " + l2.no + "便" + (o.r.legs.length > 1 ? "(さらに乗換1回)" : "") + "</div>";
-      h += "<div>→ <b>" + to + "</b> " + N.fmt(o.r.arr) + '着 <span class="gain">' + (o.gain > 0 ? "(いちばん早い通常の案より" + o.gain + "分早い)" : "(到着は同じ・乗換が減ります)") + "</span> ・ 運賃 約" + fare + "円</div>";
-      h += '<button type="button" data-walkmap="' + o.c.n + '">乗り場を地図で見る</button></li>';
+    out.slice(0, 3).forEach((L) => {
+      let fare = 0; h += "<li>";
+      L.ch.forEach((x, q) => {
+        const rt = ROUTES[x.tr.route] || ["", x.tr.route];
+        if (q) {
+          if (x.via.walk) h += '<div class="walkline">→ ' + x.prev.n + "で降りて 徒歩 約" + x.via.walk.w + "分(約" + x.via.walk.d + "m)</div>";
+          else h += "<div>→ " + x.prev.n + "で乗換(待ち " + (x.tr.stops[x.i].t - x.prev.t) + "分)</div>";
+        }
+        fare += N.fare(x.tr, x.i, x.j);
+        h += "<div>" + N.fmt(x.tr.stops[x.i].t) + " <b>" + x.tr.stops[x.i].n + '</b>発 <span class="chip ' + rt[0] + '">' + rt[1] + "</span> " + x.tr.no + "便 → <b>" + x.n + "</b> " + N.fmt(x.t) + "着</div>";
+      });
+      h += '<div><span class="gain">' + (base - L.t > 0 ? "いちばん早い通常の案より" + (base - L.t) + "分早い" : "到着は同じ・乗換が減ります") + "</span> ・ 運賃 約" + fare + "円</div>";
+      const lastWalk = L.ch.filter((x) => x.via && x.via.walk).pop();
+      h += '<button type="button" data-walkmap="' + (lastWalk ? lastWalk.via.q : L.ch[0].tr.stops[L.ch[0].i].n) + '">乗り場を地図で見る</button></li>';
     });
-    return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。到着の余裕として1分を見込んでいます。信号や坂、天気で前後しますので、余裕を持ってご利用ください。</small></details>";
+    return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍)。乗り継ぎ先まで歩く時間に1分の余裕を見込んでいます。信号や坂、天気で前後しますので、余裕を持ってご利用ください。</small></details>";
   }
   function card(r, i) {
     const trans = r.legs.length - 1;
