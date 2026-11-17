@@ -526,7 +526,19 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
         });
       });
     }
-    return Object.values(best).sort((a, b) => a.arr - b.arr || a.walk - b.walk).slice(0, 3);
+    // 乗換のあとにまだバスが続く場合は、降りた先(乗換の停留所)から最終の到着地まで続けて探し、最終到着で比べる
+    const dest = r.legs[r.legs.length - 1].to, isLast = k === r.legs.length - 1, outL = [];
+    Object.values(best).forEach((a) => {
+      if (isLast) { a.cont = null; a.finalArr = a.arr; }
+      else {
+        const rs = N.search(l.to, dest, a.arr, "dep"); if (!rs.length) return;
+        const b = rs.reduce((m, x) => (x.arr < m.arr || (x.arr === m.arr && x.legs.length < m.legs.length) ? x : m));
+        a.cont = b; a.finalArr = b.arr; a.fare += b.fare;
+      }
+      a.gain = r.arr - a.finalArr; a.dest = dest; a.origArr = r.arr; a.origDur = r.arr - r.dep; a.dur = a.finalArr - r.dep;
+      if (a.gain >= MIN_GAIN) outL.push(a);
+    });
+    return outL.sort((a, b) => a.finalArr - b.finalArr || a.arr - b.arr || a.walk - b.walk).slice(0, 3);
   }
   function walkHtml(r, k) {
     const alts = walkAlts(r, k);
@@ -538,7 +550,13 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
       h += "<li><div><b>" + a.off + "</b>で降りる(" + N.fmt(a.offT) + "着)</div>";
       h += '<div class="walkline">→ 徒歩 約' + a.walk + "分(約" + a.dist + "m)</div>";
       h += "<div><b>" + a.on + "</b> " + N.fmt(a.dep) + '発 <span class="chip ' + cls + '">' + nmR + "</span> " + a.no + "便 ・ " + a.label + "</div>";
-      h += "<div>→ <b>" + a.to + "</b> " + N.fmt(a.arr) + '着 <span class="gain">(元の案より' + a.gain + "分早い)</span></div>";
+      h += "<div>→ <b>" + a.to + "</b> " + N.fmt(a.arr) + "着</div>";
+      if (a.cont) a.cont.legs.forEach((cl, q) => {
+        const rt2 = ROUTES[cl.route] || ["", cl.route];
+        if (q) h += "<div>→ " + cl.from + "で乗換(待ち " + (cl.dep - a.cont.legs[q - 1].arr) + "分)</div>";
+        h += "<div>" + N.fmt(cl.dep) + " <b>" + cl.from + '</b>発 <span class="chip ' + rt2[0] + '">' + rt2[1] + "</span> " + cl.no + "便 → <b>" + cl.to + "</b> " + N.fmt(cl.arr) + "着</div>";
+      });
+      h += '<div>最終到着 <b>' + a.dest + "</b> " + N.fmt(a.finalArr) + '着 <span class="gain">(元の案の' + N.fmt(a.origArr) + "着より" + a.gain + "分早い)</span></div><div>出発から到着までの所要 " + dur(a.dur) + "(元の案は " + dur(a.origDur) + ")</div>";
       h += '<button type="button" data-walkmap="' + a.on + '">乗り場を地図で見る</button></li>';
     });
     return h + "</ol><small>徒歩は、直線距離から計算した目安です(時速約4.8km、道のりは直線の約1.3倍とみなしています)。信号や坂、天気で前後します。バスは1分でも余裕を見て乗り場に着くようにしてください。運賃は2区間の合計の目安です。</small></details>";
