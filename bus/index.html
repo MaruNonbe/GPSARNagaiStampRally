@@ -260,6 +260,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
   </section>
 
   <section id="p-map" role="tabpanel" aria-labelledby="tab-map" hidden>
+    <div id="mappick" class="notice" style="margin-top:0;margin-bottom:10px" hidden></div>
     <div class="mapbar">
       <div class="field"><label for="mapstop">停留所を探す</label><input type="text" id="mapstop" placeholder="例:里巻" role="combobox" aria-expanded="false" aria-controls="sg-map"><ul class="suggest" id="sg-map" role="listbox" hidden></ul></div>
       <button type="button" class="mapgps" id="mapgps">現在地</button>
@@ -289,7 +290,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
   <section id="p-train" role="tabpanel" aria-labelledby="tab-train" hidden>
     <div class="panel" id="trainform">
       <div class="seg" style="margin-top:0" role="group" aria-label="電車に乗るか降りるか"><button type="button" id="tm-board" aria-pressed="true">電車に乗る</button><button type="button" id="tm-alight" aria-pressed="false">電車を降りる</button></div>
-      <div class="field"><label for="tstop" id="tstoplab">バスに乗る停留所(出発)</label><input type="text" id="tstop" placeholder="例:宮原" role="combobox" aria-expanded="false" aria-controls="sg-tstop"><ul class="suggest" id="sg-tstop" role="listbox" hidden></ul></div>
+      <div class="field"><label for="tstop" id="tstoplab">バスに乗る停留所(出発)</label><input type="text" id="tstop" placeholder="例:宮原" role="combobox" aria-expanded="false" aria-controls="sg-tstop"><ul class="suggest" id="sg-tstop" role="listbox" hidden></ul><button type="button" class="mapgps" id="tmappick" style="margin-top:6px;align-self:flex-start">地図で選ぶ</button></div>
       <div class="field"><label for="tst">駅(山形鉄道フラワー長井線)</label><select id="tst"></select></div>
       <div class="field"><label for="ttrain" id="ttrainlab">乗る電車(駅の発車時刻)</label><select id="ttrain"></select></div>
       <div class="dt">
@@ -1155,7 +1156,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
     if (open && !list.length) { list = deps; note = "今日の運行は終わっています。次の運行日の時刻を表示しています。"; } else if (!open) note = "今日は運休です。運行日の時刻を表示しています。";
     showSheet('<h2 style="padding-right:40px">' + n + '</h2><div>' + rs.map((r) => '<span class="chip ' + ROUTES[r][0] + '">' + ROUTES[r][1] + "</span> ").join("") + "</div>" +
       navHtml(n) + photoHtml(n) + originHtml(n) +
-      '<div class="acts"><button type="button" data-a="from">ここから出発</button><button type="button" data-a="to">ここへ到着</button><button type="button" data-a="tt">時刻表を見る</button></div>' +
+      '<div class="acts">' + (TPICK ? '<button type="button" data-a="tpick" style="background:var(--accent);color:var(--accent-fg)">電車の乗り継ぎに、この停留所を使う</button>' : "") + '<button type="button" data-a="from">ここから出発</button><button type="button" data-a="to">ここへ到着</button><button type="button" data-a="tboard">電車に乗る(ここからバスで駅へ)</button><button type="button" data-a="talight">電車を降りる(駅からここへバスで)</button><button type="button" data-a="tt">時刻表を見る</button></div>' +
       (note ? '<p class="fine" style="margin:6px 0">' + note + "</p>" : "") +
       (list.length ? list.slice(0, 6).map((d) => '<div class="dep"><span class="t">' + N.fmt(d.t) + '</span><span class="chip ' + ROUTES[d.route][0] + '">' + ROUTES[d.route][1] + '</span><span class="sub">' + d.last + "行き</span></div>").join("") : '<span class="sub">この停留所の時刻はありません。</span>'));
     bindNav(n);
@@ -1163,6 +1164,8 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
     box.querySelector(".acts").onclick = (e) => { const b = e.target.closest("button"); if (!b) return;
       if (b.dataset.a === "from") { fromEl.value = n; showTab("search"); run(); }
       else if (b.dataset.a === "to") { toEl.value = n; showTab("search"); run(); }
+      else if (b.dataset.a === "tpick") { tstopEl.value = n; showTab("train"); trainRun(); }
+      else if (b.dataset.a === "tboard" || b.dataset.a === "talight") { tstopEl.value = n; showTab("train"); trainSetMode(b.dataset.a === "tboard" ? "board" : "alight"); }
       else { ttEl.value = n; renderTT(); showTab("tt"); } };
   }
   function initMap() {
@@ -1218,6 +1221,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
   ];
   const TNO = { up: [202, 204, 206, 208, 210, 212, 214, 216], dn: [201, 203, 205, 207, 209, 211, 213, 215] };
   TRAINS.forEach((s) => { s.list = []; ["up", "dn"].forEach((d) => s[d].split(" ").forEach((t, i) => s.list.push({ dir: d, t: N.hm(t.padStart(5, "0")), no: TNO[d][i] + "D" }))); s.list.sort((a, b) => a.t - b.t); });
+  let TPICK = false;
   const tm = { mode: "board" };
   const tstopEl = $("#tstop"), tstEl = $("#tst"), ttrEl = $("#ttrain"), tdateEl = $("#tdate"), twEl = $("#twalk");
   tdateEl.value = dateEl.value;
@@ -1265,6 +1269,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
   }
   $("#tm-board").onclick = () => trainSetMode("board"); $("#tm-alight").onclick = () => trainSetMode("alight");
   suggest(tstopEl, $("#sg-tstop"), () => trainRun());
+  $("#tmappick").onclick = () => { TPICK = true; const m = $("#mappick"); m.hidden = false; m.textContent = "電車の乗り継ぎに使うバス停を、地図でタップしてください。出てきた画面の「電車の乗り継ぎに、この停留所を使う」を押します。"; showTab("map"); };
   tstopEl.addEventListener("input", () => { if (STOPSET.has(tstopEl.value.trim())) trainRun(); });
   tstEl.addEventListener("change", () => { fillTrains(); trainRun(); });
   ttrEl.addEventListener("change", trainRun); tdateEl.addEventListener("change", trainRun); twEl.addEventListener("change", trainRun);
@@ -1291,6 +1296,7 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
   function showTab(id) {
     ["search", "tt", "train", "map", "info"].forEach((k) => { $("#p-" + k).hidden = k !== id; $("#tab-" + k).setAttribute("aria-selected", k === id); });
     store.set("nagai.tab", id);
+    if (id !== "map") { TPICK = false; $("#mappick").hidden = true; }
     if (id === "map") initMap();
   }
   ["search", "tt", "train", "map", "info"].forEach((k) => ($("#tab-" + k).onclick = () => showTab(k)));
