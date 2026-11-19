@@ -205,6 +205,14 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
 .sheet .dep .t { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 3.2em; }
 .mapbar { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .mapbar .field { flex: 1 1 220px; }
+
+nav.tabs { gap: 0; }
+nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
+#p-train .field select { font: inherit; padding: 10px 12px; min-height: 48px; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: 8px; width: 100%; }
+#p-train .panel > * + * { margin-top: 12px; }
+#p-train .hint { font-size: .85rem; color: var(--muted); }
+#p-train .tsum { background: var(--surface-2); border: 2px solid var(--accent); border-radius: 10px; padding: 12px 14px; margin: 14px 0 10px; font-size: 1rem; }
+#p-train .tsum b { font-size: 1.15rem; }
 </style>
 
 <div class="wrap">
@@ -218,6 +226,7 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
   <nav class="tabs" role="tablist" aria-label="メニュー">
     <button role="tab" id="tab-search" aria-selected="true" aria-controls="p-search">乗換検索</button>
     <button role="tab" id="tab-tt" aria-selected="false" aria-controls="p-tt">停留所の時刻表</button>
+    <button role="tab" id="tab-train" aria-selected="false" aria-controls="p-train">電車と乗継</button>
     <button role="tab" id="tab-map" aria-selected="false" aria-controls="p-map">地図</button>
     <button role="tab" id="tab-info" aria-selected="false" aria-controls="p-info">ご利用案内</button>
   </nav>
@@ -277,6 +286,23 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     </div>
     <div class="maplegend" id="maplegend" role="group" aria-label="表示する路線"></div>
     <p class="fine" id="mapfine"></p>
+  </section>
+
+
+  <section id="p-train" role="tabpanel" aria-labelledby="tab-train" hidden>
+    <div class="panel" id="trainform">
+      <div class="seg" style="margin-top:0" role="group" aria-label="電車に乗るか降りるか"><button type="button" id="tm-board" aria-pressed="true">電車に乗る</button><button type="button" id="tm-alight" aria-pressed="false">電車を降りる</button></div>
+      <div class="field"><label for="tstop" id="tstoplab">バスに乗る停留所(出発)</label><input type="text" id="tstop" placeholder="例:宮原" role="combobox" aria-expanded="false" aria-controls="sg-tstop"><ul class="suggest" id="sg-tstop" role="listbox" hidden></ul></div>
+      <div class="field"><label for="tst">駅(山形鉄道フラワー長井線)</label><select id="tst"></select></div>
+      <div class="field"><label for="ttrain" id="ttrainlab">乗る電車(駅の発車時刻)</label><select id="ttrain"></select></div>
+      <div class="dt">
+        <div class="field"><label for="tdate">バスに乗る日</label><input type="date" id="tdate"></div>
+        <div class="field"><label for="twalk">バス停と駅の間の徒歩</label><select id="twalk"></select></div>
+      </div>
+      <p class="hint" id="thint"></p>
+    </div>
+    <div id="tresults" aria-live="polite"></div>
+    <p class="fine">電車の時刻は山形鉄道フラワー長井線の駅別時刻表(平日・休日共通)をもとにした目安です。遅れや運休、ダイヤ改正があります。お出かけ前に <a href="https://flower-liner.jp/" target="_blank" rel="noopener">山形鉄道の案内</a> で確認してください。バスの時刻・運賃も目安です。</p>
   </section>
 
   <section id="p-info" role="tabpanel" aria-labelledby="tab-info" hidden>
@@ -990,6 +1016,74 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
     setTimeout(() => { if (!MAP.tileOK && !MAP.csp) $("#mapnote").textContent = "背景地図は表示できません(点と線のみ)"; }, 8000);
   }
 
+
+  // ---- 電車と乗り継ぐ(山形鉄道フラワー長井線) ----
+  const TRAINS = [
+    { n: "長井駅", stop: "長井市役所・長井駅前", walk: 5, up: "6:22 7:44 8:31 10:55 14:45 16:13 17:33 19:01", dn: "7:43 9:27 11:22 13:01 16:43 18:05 19:23 21:29" },
+    { n: "南長井駅", stop: "長井高校前(西口)", walk: 5, up: "6:24 7:47 8:33 10:58 14:48 16:16 17:36 19:04", dn: "7:40 9:24 11:19 12:58 16:40 18:02 19:20 21:26" },
+    { n: "時庭駅", stop: "時庭駅東口", walk: 5, up: "6:28 7:51 8:37 11:01 14:52 16:20 17:40 19:08", dn: "7:36 9:21 11:16 12:54 16:37 17:58 19:17 21:22" },
+    { n: "今泉駅", stop: "今泉駅前", walk: 5, up: "6:33 7:55 8:42 11:12 14:58 16:33 17:54 19:13", dn: "7:32 9:17 11:12 12:50 16:33 17:54 19:13 21:18" },
+    { n: "あやめ公園駅", stop: "あやめ公園前", walk: 5, up: "6:19 7:37 8:28 10:52 14:42 16:10 17:30 18:58", dn: "7:45 9:29 11:24 13:03 16:45 18:07 19:25 21:31" },
+    { n: "羽前成田駅", stop: "羽前成田駅前角", walk: 5, up: "6:16 7:33 8:25 10:49 14:39 16:07 17:27 18:55", dn: "7:48 9:32 11:27 13:06 16:48 18:10 19:28 21:34" },
+    { n: "白兎駅", stop: "白兎東", walk: 7, far: true, up: "6:12 7:30 8:21 10:46 14:36 16:04 17:24 18:52", dn: "7:51 9:35 11:31 13:09 16:52 18:13 19:32 21:37" },
+  ];
+  const TNO = { up: [202, 204, 206, 208, 210, 212, 214, 216], dn: [201, 203, 205, 207, 209, 211, 213, 215] };
+  TRAINS.forEach((s) => { s.list = []; ["up", "dn"].forEach((d) => s[d].split(" ").forEach((t, i) => s.list.push({ dir: d, t: N.hm(t.padStart(5, "0")), no: TNO[d][i] + "D" }))); s.list.sort((a, b) => a.t - b.t); });
+  const tm = { mode: "board" };
+  const tstopEl = $("#tstop"), tstEl = $("#tst"), ttrEl = $("#ttrain"), tdateEl = $("#tdate"), twEl = $("#twalk");
+  tdateEl.value = dateEl.value;
+  tstEl.innerHTML = TRAINS.map((s, i) => '<option value="' + i + '">' + s.n + "</option>").join("");
+  twEl.innerHTML = [3, 5, 7, 10, 15, 20].map((m) => '<option value="' + m + '">' + m + "分</option>").join("");
+  const tStation = () => TRAINS[+tstEl.value];
+  function fillTrains() {
+    const s = tStation(), board = tm.mode === "board";
+    const nm = (d) => (board ? (d === "up" ? "赤湯方面行き" : "荒砥方面行き") : (d === "up" ? "荒砥方面から着く(赤湯行き)" : "赤湯方面から着く(荒砥行き)"));
+    ttrEl.innerHTML = s.list.map((x, i) => '<option value="' + i + '">' + N.fmt(x.t) + " " + nm(x.dir) + "(" + x.no + ")</option>").join("");
+    twEl.value = String(s.walk);
+    $("#thint").textContent = s.n + "の近くのバス停は「" + s.stop + "」です。" + (s.far ? "駅から約500m(徒歩約" + s.walk + "分)あります。急ぐときや、足もとが悪いときは、もっと時間がかかる場合もあります。余裕を持ってご利用ください。" : "") + (board ? "駅の発車時刻に間に合うバスを探します。" : "電車が着いてから、歩いて乗れるバスを探します。");
+  }
+  function trainRun() {
+    const box = $("#tresults"), s = tStation(), x = s.list[+ttrEl.value], walk = +twEl.value, stop = tstopEl.value.trim();
+    if (!STOPSET.has(stop)) { box.innerHTML = '<div class="empty">' + (tm.mode === "board" ? "バスに乗る" : "バスで行く") + "停留所を、候補から選んでください。</div>"; return; }
+    const reason = off(tdateEl.value);
+    if (reason) { box.innerHTML = '<div class="empty">' + (tdateEl.value ? label(tdateEl.value) + "は" : "") + reason.replace(/^.*は/, "").replace("です", "") + "のため、バスは走りません。日付を変えてください。</div>"; return; }
+    if (N.setDate) { const p0 = parse(tdateEl.value); N.setDate(p0.y, p0.m, p0.d); }
+    const board = tm.mode === "board", dirTxt = x.dir === "up" ? "赤湯" : "荒砥";
+    let html = "", res;
+    if (board) {
+      const need = x.t - walk;
+      if (stop === s.stop) { box.innerHTML = '<div class="tsum">' + stop + "は駅のすぐ近くのバス停です。歩いて " + walk + " 分、 <b>" + N.fmt(x.t - walk) + "</b> までに出れば、 " + N.fmt(x.t) + " の電車(" + dirTxt + "行き)に乗れます。</div>"; return; }
+      res = N.search(stop, s.stop, need, "arr");
+      html += '<div class="tsum"><b>' + s.n + " " + N.fmt(x.t) + "発(" + dirTxt + "行き・" + x.no + ")</b>に乗るには、" + s.stop + "に <b>" + N.fmt(need) + "</b> までに着くバスに乗ります(駅まで徒歩 " + walk + "分)。</div>";
+      if (!res.length) { box.innerHTML = html + '<div class="empty">この電車に間に合うバスは見つかりませんでした。もっと早い電車を選ぶか、日付を変えてください。乗換は、長井市役所・長井駅前とヤマザワ前の2か所だけを探しています。</div>'; return; }
+      html += '<p class="hint">いちばん遅く出られるバスが上に出ます。</p>';
+      html += res.map((r, i) => '<div class="hint" style="margin:10px 0 4px"><b>' + (i === 0 ? "いちばん遅く出られるバス" : "もっと早いバス") + "</b>:" + N.fmt(r.dep) + " 発 → " + s.stop + " " + N.fmt(r.arr) + " 着 → 徒歩 " + walk + " 分 → " + N.fmt(r.arr + walk) + " 駅着(電車まで " + (x.t - r.arr - walk) + "分)</div>" + card(r, i)).join("");
+    } else {
+      const start = x.t + walk;
+      if (stop === s.stop) { box.innerHTML = '<div class="tsum">' + stop + "は駅のすぐ近くのバス停です。電車が着いて(" + N.fmt(x.t) + ")、歩いて " + walk + " 分の <b>" + N.fmt(start) + "</b> 以降のバスに乗れます。</div>"; return; }
+      res = N.search(s.stop, stop, start, "dep");
+      html += '<div class="tsum"><b>' + s.n + " " + N.fmt(x.t) + " 着(" + (x.dir === "up" ? "荒砥" : "赤湯") + "方面から・" + x.no + ")</b>を降りたら、徒歩 " + walk + " 分で " + s.stop + "(" + N.fmt(start) + " ごろ)。そこから乗れるバスです。</div>";
+      if (!res.length) { box.innerHTML = html + '<div class="empty">この電車のあとに乗れるバスは見つかりませんでした。日付を変えるか、乗換は、長井市役所・長井駅前とヤマザワ前の2か所だけを探していることをご確認ください。</div>'; return; }
+      html += res.map((r, i) => '<div class="hint" style="margin:10px 0 4px"><b>' + (i === 0 ? "いちばん早く乗れるバス" : "次のバス") + "</b>:" + N.fmt(r.dep) + " 発(電車から " + (r.dep - x.t) + "分後)</div>" + card(r, i)).join("");
+    }
+    box.innerHTML = html;
+  }
+  function trainSetMode(m) {
+    tm.mode = m; $("#tm-board").setAttribute("aria-pressed", m === "board"); $("#tm-alight").setAttribute("aria-pressed", m === "alight");
+    $("#tstoplab").textContent = m === "board" ? "バスに乗る停留所(出発)" : "バスで向かう停留所(到着)";
+    $("#ttrainlab").textContent = m === "board" ? "乗る電車(駅の発車時刻)" : "降りる電車(駅の到着時刻)";
+    fillTrains(); trainRun();
+  }
+  $("#tm-board").onclick = () => trainSetMode("board"); $("#tm-alight").onclick = () => trainSetMode("alight");
+  suggest(tstopEl, $("#sg-tstop"), () => trainRun());
+  tstopEl.addEventListener("input", () => { if (STOPSET.has(tstopEl.value.trim())) trainRun(); });
+  tstEl.addEventListener("change", () => { fillTrains(); trainRun(); });
+  ttrEl.addEventListener("change", trainRun); tdateEl.addEventListener("change", trainRun); twEl.addEventListener("change", trainRun);
+  tstopEl.value = STOPSET.has("宮原") ? "宮原" : "里巻";
+  tstEl.value = "0"; fillTrains();
+  // 初期値: 長井駅 8:31発(朝の通勤・通学向け)
+  { const k = TRAINS[0].list.findIndex((y) => y.dir === "up" && y.t === N.hm("08:31")); if (k >= 0) ttrEl.value = String(k); }
+
   // ---- 配線 ----
   suggest(fromEl, $("#sg-from"), () => toEl.focus());
   suggest(toEl, $("#sg-to"), () => run());
@@ -1006,11 +1100,11 @@ details.via ol { margin: 4px 0 0; padding-left: 1.4em; color: var(--muted); font
   ttEl.value = "長井市役所・長井駅前";
 
   function showTab(id) {
-    ["search", "tt", "map", "info"].forEach((k) => { $("#p-" + k).hidden = k !== id; $("#tab-" + k).setAttribute("aria-selected", k === id); });
+    ["search", "tt", "train", "map", "info"].forEach((k) => { $("#p-" + k).hidden = k !== id; $("#tab-" + k).setAttribute("aria-selected", k === id); });
     store.set("nagai.tab", id);
     if (id === "map") initMap();
   }
-  ["search", "tt", "map", "info"].forEach((k) => ($("#tab-" + k).onclick = () => showTab(k)));
+  ["search", "tt", "train", "map", "info"].forEach((k) => ($("#tab-" + k).onclick = () => showTab(k)));
   $("#themebtn").onclick = () => {
     const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     r.dataset.theme = dark ? "light" : "dark";
