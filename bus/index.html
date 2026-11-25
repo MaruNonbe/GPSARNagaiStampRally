@@ -216,6 +216,30 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
 #p-train .tsum b { font-size: 1.15rem; }
 
 .surveybtn{display:inline-flex;align-items:center;justify-content:center;margin-top:12px;min-height:48px;padding:10px 20px;border:2px solid var(--accent);border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:1.02rem;text-decoration:none}
+.svmodal{position:fixed;inset:0;z-index:9000;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(28px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.svmodal[hidden]{display:none}
+.svin{max-width:680px;margin:0 auto;display:grid;gap:16px}
+.svin h2{font-size:1.3rem;margin:0}
+.svin p{margin:0}
+.svq{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+.svq legend,.svq .ql{font-weight:700;font-size:1.02rem;line-height:1.5;padding:0}
+.svq fieldset{border:0;margin:0;padding:0;min-width:0}
+.svopt{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;font-size:1.02rem;line-height:1.45;cursor:pointer;border-radius:8px}
+.svopt input{width:22px;height:22px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+.svopt:has(input:checked){background:var(--accent-soft)}
+.svq textarea{width:100%;min-height:92px;margin-top:8px;font:inherit;padding:10px;border:2px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg)}
+.svq textarea:focus{border-color:var(--accent);outline:none}
+.svbar{display:flex;flex-wrap:wrap;gap:10px}
+.svbtn{font:inherit;font-weight:700;font-size:1.05rem;min-height:52px;padding:0 22px;border-radius:10px;border:2px solid var(--accent);background:var(--accent);color:var(--accent-fg);cursor:pointer}
+.svbtn.ghost{background:transparent;color:var(--accent)}
+.svbtn.danger{border-color:#b3261e;color:#b3261e;background:transparent}
+.svbtn:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.svmsg{font-weight:700;color:var(--accent)}
+.svwarn{font-weight:700;color:#b3261e}
+.svtable{width:100%;border-collapse:collapse;font-size:.95rem}
+.svtable td,.svtable th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
+.svbarv{display:inline-block;height:10px;background:var(--accent);border-radius:5px;vertical-align:middle}
+.svfree{margin:4px 0 0;padding-left:1.2em;font-size:.95rem}
 .surveybtn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 #splash{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;color:#fff;background:linear-gradient(160deg,#0a5444 0%,#0E6B58 55%,#14826a 100%);padding:max(24px,env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) max(24px,env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px));cursor:pointer;transition:opacity .6s ease,visibility .6s}
 #splash.out{opacity:0;visibility:hidden}
@@ -269,12 +293,123 @@ nav.tabs button { font-size: .82rem; padding: 0 2px; line-height: 1.3; }
     <p>西根・致芳・平野・伊佐沢・豊田の5路線。平日のみ運行、1日7便。</p>
     <div class="hubbar"><span class="hub red">長井市役所・長井駅前</span><span class="hub blue">ヤマザワ前</span><span class="sub" style="align-self:center">この2か所で乗り換えます</span></div>
     <p class="trialbar">11月28日〜12月30日は、実証運行(特別ダイヤ・運賃無料)です。その期間に乗るときは <a href="./jissho.html">実証運行版</a> をご利用ください。</p>
-    <a id="surveybtn" class="surveybtn" target="_blank" rel="noopener noreferrer" hidden>アンケートにご協力ください(約2分)</a>
+    <a id="surveybtn" class="surveybtn" href="#" hidden>アンケートにご協力ください(約2分)</a>
   </header>
+<div id="svmodal" class="svmodal" role="dialog" aria-modal="true" aria-labelledby="svtitle" hidden>
+  <div class="svin">
+    <div class="svbar" style="justify-content:space-between;align-items:center"><h2 id="svtitle">アンケートにご協力ください</h2><button type="button" class="svbtn ghost" id="svclose">閉じる</button></div>
+    <div id="svbody"></div>
+  </div>
+</div>
 <script>
-// アンケート(Googleフォーム)のアドレスをここに入れると、ボタンが表示されます。空のあいだは表示されません。
-var SURVEY_URL = "";
-(function(){var a=document.getElementById('surveybtn');if(a&&SURVEY_URL){a.href=SURVEY_URL;a.hidden=false}})();
+// ---- 端末内アンケート(回答はこの端末のブラウザの中だけに保存し、外には送りません) ----
+(function(){
+  var KEY='nagai_bus_survey_v1', IS_JISSHO=/jissho/.test(location.pathname);
+  var ADMIN=/[?&]admin/.test(location.search);
+  var Q=[
+   {id:'age',t:'年代',type:'radio',o:['10代以下','20代','30代','40代','50代','60代','70代','80代以上']},
+   {id:'live',t:'お住まい',type:'radio',o:['長井市内','置賜地方のほかの市町','山形県内のほかの地域','県外']},
+   {id:'bus',t:'市営バスに乗る頻度',type:'radio',o:['ほぼ毎日','週に数回','月に数回','年に数回','ほとんど乗らない']},
+   {id:'train',t:'フラワー長井線に乗る頻度',type:'radio',o:['ほぼ毎日','週に数回','月に数回','年に数回','ほとんど乗らない']},
+   {id:'how',t:'普段の乗り換えの調べ方(いくつでも)',type:'check',o:['スマホの地図アプリ','紙の時刻表','バス停で確認','人に聞く','調べない']},
+   {id:'used',t:'試した画面(いくつでも)',type:'check',o:['乗換検索','列車と乗継','現在地から探す','歩く案(待ち時間の短縮)','停留所の時刻表','地図・写真']},
+   {id:'ease',t:'使いやすさ',type:'radio',o:['とても使いやすい','使いやすい','ふつう','使いにくい','とても使いにくい']},
+   {id:'view',t:'文字の大きさと見やすさ',type:'radio',o:['とても見やすい','見やすい','ふつう','見にくい','とても見にくい']},
+   {id:'intent',t:'このアプリがあれば、バスや列車を使ってみたいですか',type:'radio',o:['ぜひ使いたい','使ってみたい','どちらともいえない','あまり使いたくない','使いたくない']},
+   {id:'scene',t:'どんなときに役立ちそうですか(いくつでも)',type:'check',o:['通院','買い物','通勤・通学','観光','列車との乗り継ぎ','そのほか']},
+   {id:'want',t:'こんな機能がほしい',type:'text'},
+   {id:'bug',t:'分かりにくかった点や、気づいた誤り',type:'text'},
+   {id:'city',t:'市のホームページなどでこのアプリが紹介されたら、使いたいですか',type:'radio',o:['使いたい','どちらでもない','使わない','分からない']}
+  ];
+  var $=function(s){return document.querySelector(s)};
+  var modal=$('#svmodal'), body=$('#svbody'), btn=$('#surveybtn');
+  var memStore=[], storeOK=true;
+  function load(){try{var v=localStorage.getItem(KEY);return v?JSON.parse(v):[]}catch(e){storeOK=false;return memStore}}
+  function save(a){try{localStorage.setItem(KEY,JSON.stringify(a));return true}catch(e){storeOK=false;memStore=a;return false}}
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function open(){modal.hidden=false;modal.scrollTop=0;document.body.style.overflow='hidden'}
+  function close(){modal.hidden=true;document.body.style.overflow=''}
+  function showForm(){
+    var h='<p>お試しいただき、ありがとうございます。アプリの改良のため、ご意見をお聞かせください。回答は任意で、お名前は伺いません。回答は、この端末の中だけに保存され、集計した結果は、アプリの改良と、長井市への提案資料(統計として)に使います。</p>';
+    Q.forEach(function(q,i){
+      h+='<div class="svq"><fieldset><legend>'+(i+1)+'. '+esc(q.t)+'</legend>';
+      if(q.type==='text'){h+='<textarea id="sv_'+q.id+'" aria-label="'+esc(q.t)+'"></textarea>'}
+      else{q.o.forEach(function(o,j){h+='<label class="svopt"><input type="'+(q.type==='check'?'checkbox':'radio')+'" name="sv_'+q.id+'" value="'+esc(o)+'"><span>'+esc(o)+'</span></label>'})}
+      h+='</fieldset></div>';
+    });
+    h+='<p id="svmsg" class="svwarn" role="alert"></p><div class="svbar"><button type="button" class="svbtn" id="svsend">回答を送信する</button><button type="button" class="svbtn ghost" id="svcancel">やめる</button></div>';
+    if(!storeOK)h+='<p class="svwarn">この画面では保存できない可能性があります。ブラウザ(Safariなど)で開いてください。</p>';
+    body.innerHTML=h;
+    $('#svsend').onclick=send;$('#svcancel').onclick=close;
+  }
+  function collect(){
+    var r={},any=false;
+    Q.forEach(function(q){
+      if(q.type==='text'){var v=($('#sv_'+q.id).value||'').trim();r[q.id]=v;if(v)any=true}
+      else{var xs=[].slice.call(document.querySelectorAll('input[name="sv_'+q.id+'"]:checked')).map(function(e){return e.value});r[q.id]=xs.join(' / ');if(xs.length)any=true}
+    });
+    return any?r:null;
+  }
+  function send(){
+    var r=collect();
+    if(!r){$('#svmsg').textContent='回答が1つも入っていません。1つ以上、選んでください。';return}
+    var all=load();var d=new Date();
+    var ts=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    all.push({ts:ts,ver:IS_JISSHO?'実証運行版':'通常版',a:r});
+    var ok=save(all);
+    body.innerHTML='<div class="svq"><p class="svmsg" style="font-size:1.25rem">ご協力ありがとうございました。</p>'+(ok?'':'<p class="svwarn">保存できませんでした。この画面を閉じると、回答が消える可能性があります。</p>')+'</div><div class="svbar"><button type="button" class="svbtn" id="svnext">続けて、別の方が回答する</button><button type="button" class="svbtn ghost" id="svdone">閉じる</button></div>';
+    $('#svnext').onclick=function(){showForm();modal.scrollTop=0};$('#svdone').onclick=close;
+  }
+  // ---- 運営用の集計(アドレスの末尾に ?admin を付けたときだけ表示) ----
+  function csv(all){
+    var head=['日時','版'].concat(Q.map(function(q){return q.t}));
+    var rows=[head].concat(all.map(function(x){return [x.ts,x.ver].concat(Q.map(function(q){return x.a[q.id]||''}))}));
+    return rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"'}).join(',')}).join('\r\n');
+  }
+  function showAdmin(){
+    var all=load(),h='<p><b>回答数: '+all.length+' 件</b>(この端末で受け付けた分。通常版 '+all.filter(function(x){return x.ver==='通常版'}).length+' / 実証運行版 '+all.filter(function(x){return x.ver!=='通常版'}).length+')</p>';
+    h+='<div class="svbar"><button type="button" class="svbtn" id="svcsv">CSVとして保存</button><button type="button" class="svbtn ghost" id="svcopy">CSVをコピー</button><button type="button" class="svbtn ghost" id="svform">アンケートを開く</button></div><p id="svmsg" class="svmsg" role="status"></p>';
+    Q.forEach(function(q,i){
+      h+='<div class="svq"><div class="ql">'+(i+1)+'. '+esc(q.t)+'</div>';
+      if(q.type==='text'){
+        var ts=all.map(function(x){return x.a[q.id]}).filter(Boolean);
+        h+=ts.length?'<ul class="svfree">'+ts.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul>':'<p class="mut">回答なし</p>';
+      }else{
+        var cnt={};q.o.forEach(function(o){cnt[o]=0});
+        all.forEach(function(x){(x.a[q.id]||'').split(' / ').forEach(function(o){if(o&&o in cnt)cnt[o]++})});
+        var mx=Math.max.apply(null,q.o.map(function(o){return cnt[o]}).concat([1]));
+        h+='<table class="svtable">'+q.o.map(function(o){return '<tr><td>'+esc(o)+'</td><td style="width:42%"><span class="svbarv" style="width:'+Math.round(cnt[o]/mx*100)+'%"></span></td><td style="width:2.5em;text-align:right">'+cnt[o]+'</td></tr>'}).join('')+'</table>';
+      }
+      h+='</div>';
+    });
+    h+='<div class="svq"><div class="ql">回答の削除</div><p class="mut">削除すると元に戻せません。先にCSVを保存してください。</p><div class="svbar" style="margin-top:8px"><button type="button" class="svbtn danger" id="svdel">すべて削除する</button></div></div>';
+    body.innerHTML=h;
+    $('#svcsv').onclick=function(){
+      var txt='﻿'+csv(all);
+      try{var u=URL.createObjectURL(new Blob([txt],{type:'text/csv;charset=utf-8'}));var a=document.createElement('a');a.href=u;a.download='nagai_bus_survey.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},3000);$('#svmsg').textContent='保存を始めました。保存されない場合は、「CSVをコピー」を使ってください。'}
+      catch(e){$('#svmsg').textContent='保存できませんでした。「CSVをコピー」を使ってください。'}
+    };
+    $('#svcopy').onclick=function(){
+      var txt=csv(all);
+      function fb(){var ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='width:100%;height:200px;margin-top:8px';$('#svmsg').after(ta);ta.select();$('#svmsg').textContent='下の文字を選んで、コピーしてください。'}
+      try{navigator.clipboard.writeText(txt).then(function(){$('#svmsg').textContent='コピーしました。メモやメールに貼り付けてください。'},fb)}catch(e){fb()}
+    };
+    $('#svform').onclick=function(){showForm()};
+    var armed=false;
+    $('#svdel').onclick=function(){
+      if(!armed){armed=true;this.textContent='本当に削除する(もう一度押す)';return}
+      save([]);memStore=[];showAdmin();$('#svmsg').textContent='削除しました。';
+    };
+  }
+  function openForm(){showForm();open()}
+  if(btn){btn.removeAttribute('href');btn.removeAttribute('target');btn.setAttribute('role','button');btn.hidden=false;btn.style.cursor='pointer';btn.onclick=function(e){e.preventDefault();openForm()}}
+  $('#svclose').onclick=close;
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!modal.hidden)close()});
+  if(ADMIN&&btn){
+    var ab=document.createElement('button');ab.type='button';ab.className='svbtn ghost';ab.style.cssText='margin-top:10px;margin-left:8px;display:block';ab.textContent='アンケート結果(運営用)';
+    ab.onclick=function(){showAdmin();open()};btn.after(ab);
+  }
+})();
 </script>
 
   <nav class="tabs" role="tablist" aria-label="メニュー">
